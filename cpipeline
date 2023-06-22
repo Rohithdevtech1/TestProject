@@ -1,0 +1,1161 @@
+slave_node = 'IND856ZQG2-L'
+ 
+  pipeline {
+  agent {node {label """${slave_node}""" } }
+  
+  options {
+   timestamps()
+   disableConcurrentBuilds()
+   skipDefaultCheckout()
+   buildDiscarder logRotator(artifactDaysToKeepStr: '30', artifactNumToKeepStr: '30', daysToKeepStr: '30', numToKeepStr: '30')
+  }
+  
+  environment{
+      cov_username='buildsystem'
+      cov_password='buildsystem'
+      no_proxy='cov.group8.visteon.com,bsp-os.git.visteon.com,eu.git.visteon.com,git.visteon.com,*.visteon.com,jfrog.glcc.visteon.com,jfrog.bangalore.visteon.com'
+      http_proxy='http://proxy.visteon.com:80'
+      https_proxy='http://proxy.visteon.com:80'
+      //dn =  '/home/jenkins/.local/bin/dn'
+      PATH="""/home/jenkins/.local/bin:${HOME}/.local/bin:$PATH"""
+      MANIFEST='my2023/extAmp/product/develop.xml'
+	  BRANCH ='develop'
+	  currentDate = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+      WORK_ID=""
+     
+  }
+  
+ stages {
+  
+     stage('Fetch') {
+          steps {
+    	  script{
+    	      
+            echo "checkout started ...!!"
+    
+            buildName '${PROJECT_DISPLAY_NAME}-${BUILD_NUMBER}'  
+            //copyArtifacts filter: 'daily.xml', fingerprintArtifacts: true, projectName: 'Nissan_P61QR/Nisaan_P61QR_Domain_Turing', selector: lastSuccessful()
+            sh ''' rm -rf .repo programs cluster-platform after_sync_* extamp-fbl-bsw extamp-pd Vector git-hooks''' 
+            //sh ''' rm -rf https://bsp-os.git.visteon.com/platform/bsp-os/devops/git-hooks'''
+            //sh """  dn ci gitfetch --profile  profile.ini"""
+            //sh """ dn ci gitfetch  --profile https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest/-/blob/feature/single_build_extAmp/my2023/extAmp/scania_my2023_extamp_ubuntu20.ini --d . """
+            sh """ dn ci gitfetch  --profile https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest/-/blob/develop/my2023/extAmp/scania_my2023_extamp_ubuntu20.ini --d . """
+    	 }
+      }
+    }
+    
+stage('Generate consolidated after_sync.xm'){
+    steps{
+        script{
+
+    sh""" python3 .repo/repo/repo manifest -o - -r>after_sync.xml """
+    sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/after_sync.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_PROMOTION_DEVELOP_INT/ """
+      
+        }
+    }
+} 
+
+//stage('Build Stages') {
+//	parallel {   
+stage('BM_BUILD') {
+   environment{
+        VARIANT='bm_platform.xml'
+   }
+    steps {
+     script {
+      echo "BM build started..!!"
+        
+//        sleep 5
+
+       sh""" dn ci build --type bmclean --profile profile.ini  """
+        
+         sh""" dn ci build --type bm --profile profile.ini  """
+
+    }
+   // recordIssues aggregatingResults: true, tools: [ghsMulti(name: 'GHS_compiler_warning', pattern: '/home/jenkins/workspace/Nissan_P61QR/Nisaan_P61QR_Domain_Turing/programs/nissan/my2023/P61QR/out/VP_Platform/P61QR_Traveo2/release/warnings.txt')]
+   }
+  }
+
+stage('HSM_BUILD') {
+   environment{
+        VARIANT='platform_tv2_cm0plus.xml'
+   }
+    steps {
+     script {
+      echo "HSM build started..!!"
+
+  //      sleep 5
+        
+        sh""" dn ci build --type hsmclean --profile profile.ini  """
+        
+        sh""" dn ci build --type hsm --profile profile.ini  """
+
+    }
+   // recordIssues aggregatingResults: true, tools: [ghsMulti(name: 'GHS_compiler_warning', pattern: '/home/jenkins/workspace/Nissan_P61QR/Nisaan_P61QR_Domain_Turing/programs/nissan/my2023/P61QR/out/VP_Platform/P61QR_Traveo2/release/warnings.txt')]
+   }
+  }
+
+stage('BL_BUILD') {
+   environment{
+        VARIANT='fbl_platform.xml'
+   }
+    steps {
+     script {
+      echo "BL build started..!!"
+        
+    //    sleep 5
+
+       sh""" dn ci build --type blclean --profile profile.ini  """
+        
+         sh""" dn ci build --type bl --profile profile.ini  """
+
+    }
+   // recordIssues aggregatingResults: true, tools: [ghsMulti(name: 'GHS_compiler_warning', pattern: '/home/jenkins/workspace/Nissan_P61QR/Nisaan_P61QR_Domain_Turing/programs/nissan/my2023/P61QR/out/VP_Platform/P61QR_Traveo2/release/warnings.txt')]
+   }
+  }
+
+   stage('VP_BUILD_PreDV') {
+        environment{
+        VARIANT='platform.xml'
+        }
+        steps {
+             script {
+              echo "VP build started..!!"
+
+      //         sleep 5
+
+               sh""" dn ci build --type vpclean --profile profile.ini  """
+        
+                sh""" dn ci build --type vp --profile profile.ini  """
+                
+               // sh""" dn ci build --type vpdebugclean --profile profile.ini  """
+                
+                // sh""" dn ci build --type vpdebug --profile profile.ini  """
+        
+            }
+             recordIssues(tools: [ghsMulti(pattern: 'build.log')])
+            }
+          }
+//  }
+//}
+
+
+  stage('Hex file transfer '){
+      steps{
+          script{
+  
+     build 'Scania_my2023_extAmp_EP28995_HEX_FILE_TRANSFER'
+             
+          }
+      }
+  }
+    
+//stage('Coverity Stages') {
+//	parallel {     
+    stage('vpcovcommit') {
+			steps {
+				script {
+					echo "vp-cov-build started ...!!"
+					sh""" dn ci build --type vpcovcommit --profile profile.ini  """
+				}
+			}
+		}
+			
+		stage('vpmisracommit') {
+			steps {
+				script {
+					echo "vp-misra-build started ...!!"
+					sh""" dn ci build --type vpmisracommit --profile profile.ini  """
+				}
+			}
+		}
+
+  //}
+//}
+
+			
+stage('Cov_plot') {
+			steps {
+				script {
+					echo "Cov_plot started..!!"
+		      dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/coverity_ini_scripts/"""){
+sh '''python ./cov_fetch.py cov-projects_Scania_extAmp.ini VP_Coverity VP_Coverity.json '''
+sh '''python ./cov_fetch.py cov-projects_Scania_extAmp.ini VP_MISRA_C VP_MISRA_C.json '''
+
+sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/coverity_ini_scripts/VP_Coverity.json /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY """
+sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/coverity_ini_scripts/VP_MISRA_C.json /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY """
+
+		}
+    }
+recordIssues(tools: [issues(id:'vp-cov',name:'vp-coverity', pattern: 'VP_Coverity.json')])
+recordIssues(tools: [issues(id:'vp-misra',name:'vp_misra',  pattern: 'VP_MISRA_C.json')])
+			}
+		}
+		stage('gen_vp_coverity_plot') {
+  steps {
+    script {
+        echo "vp-coverity Static/MISRA warning Plot started ...!!"
+        sh """
+        cd ${WORKSPACE}
+        python3 ./programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/gen_cov_plots.py VIP"""
+    }
+  }
+}
+
+
+stage('Coverity_Summary_plot') {
+    steps {
+        script {
+            echo "Tech Team wise warning spilt up Plot started ...!!"
+            sh ''' 
+            cd ${WORKSPACE}
+            python3 ./programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/coverity_summary.py
+            '''
+      }
+    }
+  }
+
+
+		stage("Integration_test_Approval") {
+
+      input {		
+                message " Please enter your Work Id "		
+                ok ""		
+                submitter ""		
+                parameters {		
+                    string(name: 'MY_VAR2', defaultValue: '', description: 'Thank you')		
+                }		
+            }	
+       
+            steps {
+                        
+                script {
+                            
+                      env.RELEASE_TO_PROD = input message: 'Integrator input required',
+                      parameters: [choice(name: 'Promote to Integration', choices: 'no\nyes', description: 'Choose "yes" if Integration test are success')]
+                      
+                      WORK_ID = """${MY_VAR2}"""
+
+                       }
+                    }
+                } 
+           stage("Approve or Reject") {
+        		
+        			parallel {
+        		
+        				stage("Approved") {
+        					
+        					when {
+        					  allOf {
+        						  
+        						  environment name: 'RELEASE_TO_PROD', value: 'yes'
+        					  }
+        					}
+        								
+        					steps {
+        
+        						echo 'Approved to Integration build'
+                    
+                                build 'Scania_my2023_extAmp_EP28995_PROMOTION_DEVELOP_INT'
+  
+                					
+        					}
+        					
+        				}
+        				
+        				stage("Rejected") {
+        					
+        					when {
+        					  allOf {
+        						  
+        						  environment name: 'RELEASE_TO_PROD', value: 'no'
+        					  }
+        					}
+        								
+        					steps {
+        						echo ' Not Approved '
+        						sh ''' Exit 1 '''
+        					}
+        				}
+        		
+  stage("Disapproved manifest Push") {
+
+					when {
+					  allOf {
+						  environment name: 'RELEASE_TO_PROD', value: 'no'
+					  }
+					}
+
+		   steps {
+               script{
+                
+                sh """ cp -r after_sync.xml Disapproved_${currentDate}-${build_number}.xml"""
+                
+                sh """ cp -r after_sync.xml daily.xml """
+
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+
+                MY_VAR = sh(script: 'bash /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/compare_Scania_extAmp_daily.sh', returnStdout: true)
+                
+                sh """exit ${MY_VAR}""" 
+                
+                withCredentials([usernameColonPassword(credentialsId: '07fee9c3-cd94-4196-82ec-ad3bddf7fe3f', variable: 'passkey')]) {
+                
+                sh """ rm -rf manifest """
+                
+                sh """ git clone https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git """
+             
+                dir("""${env.workspace}/manifest/my2023/extAmp/product/daily"""){
+                    sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/Disapproved_${currentDate}-${build_number}.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/manifest/my2023/extAmp/product/daily/"""            
+                    sh """ python3 /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/milestone_manifest_count_30.py """
+                    sh """ git add . && git commit -m "WI ${WORK_ID} ${currentDate}" && git tag Scania_my2023_extAmp_EP28995_DAILY_${BUILD_NUMBER} && git push https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git develop --tags --no-verify"""         
+                }        
+    		            sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/daily.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/last_build.xml """            
+            }
+          }
+        }
+      }
+    }        
+ 	}
+}
+
+
+stage("Update daily.xml") {
+    steps {
+      script {
+               env.RELEASE_TO_PROD = input message: 'Integrator input required',
+               parameters: [choice(name: 'Promote to Integration', choices: 'no\nyes', description: 'Choose "yes" if Integration test are success')]
+			   echo 'Updated daily.xml'
+
+        }
+    }
+}
+ 
+stage("Approve_or_Reject") {
+			parallel {
+				stage("Approved_") 
+				{
+					when {
+					  allOf {
+						  environment name: 'RELEASE_TO_PROD', value: 'yes'
+					  }
+					}
+								
+				steps {
+						echo 'Integrater updated the daily.xml with tags from develop.xml'
+					}
+				}
+				
+				stage("Rejected_") 
+				{
+					when {
+					  allOf {
+						  environment name: 'RELEASE_TO_PROD', value: 'no'
+					  }
+					}
+								
+				steps {
+				echo 'Integrater not updated the daily.xml with tags from develop.xml'
+				sh ''' Exit 1 '''
+				  }
+				}
+	}
+}
+
+
+stage('Archive_after_sync.xml') {
+   steps {
+     script {
+       echo "archive artifacts"
+       sh """ python3 .repo/repo/repo manifest -o - -r>after_sync_${build_number}.xml"""
+       sh """ cp -r after_sync_${build_number}.xml daily.xml"""
+	   sh """ cp -r after_sync_${build_number}.xml ${currentDate}-${build_number}.xml"""
+    }
+     plot csvFileName: 'coverity_static_defects_count.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_static_defects_count.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-StaticAnalysis-extamp', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'line', title: 'Coverity - Static Analysis extamp', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+     plot csvFileName: 'coverity_misra_defects_count.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_misra_defects_count.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-MISRA-extamp', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'line', title: 'Coverity - MISRA extamp', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+    
+    plot csvFileName: 'Coverity_High.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_High.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-High', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-High-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+    plot csvFileName: 'Coverity_Medium.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Medium.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-Medium', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-Medium-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+    plot csvFileName: 'Coverity_Low.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Low.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-Low', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-Low-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''    
+    plot csvFileName: 'Coverity_All.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_All.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity_All', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-All-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+        
+    publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch', reportFiles: 'Coverity_Summary_extamp.html', reportName: 'Coverity_Summary_EXTAMP'])
+   
+    archiveArtifacts allowEmptyArchive: true, artifacts: """daily.xml"""
+    archiveArtifacts allowEmptyArchive: true, artifacts: """after_sync_${build_number}.xml"""
+    archiveArtifacts allowEmptyArchive: true, artifacts: """after_sync.xml,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_High.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Medium.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Low.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_All.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_static_defects_count.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_misra_defects_count.csv,/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Summary_extamp.html"""
+     
+	}
+}
+
+//stage('Git_Push, Upload artifacts, NVM Reports, Ram Rom reports & Hawk-eye Stages') {
+//	parallel { 
+ stage("Git_Push") {
+  steps {
+    script{
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+
+                MY_VAR = sh(script: 'bash /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/compare_Scania_extAmp_daily.sh', returnStdout: true)
+                
+                sh """exit ${MY_VAR}""" 
+                
+                withCredentials([usernameColonPassword(credentialsId: '07fee9c3-cd94-4196-82ec-ad3bddf7fe3f', variable: 'passkey')]) {
+                
+                sh """ rm -rf manifest """
+                
+                sh """ git clone https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git """
+             
+                dir("""${env.workspace}/manifest/my2023/extAmp/product/daily"""){
+                    sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/${currentDate}-${build_number}.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/manifest/my2023/extAmp/product/daily/"""            
+                    sh """ python3 /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/milestone_manifest_count_30.py """
+                    sh """ git add . && git commit -m "WI ${WORK_ID} ${currentDate}" && git tag Scania_my2023_extAmp_EP28995_DAILY_${BUILD_NUMBER} && git push https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git develop --tags --no-verify"""         
+                }        
+    		       sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/daily.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/last_build.xml """            
+              }
+          }
+        }
+    }
+} 
+
+
+stage ('Upload_Artifacts_Bangalore')
+     {
+        steps{
+            script{
+                 dir("""${env.workspace}/programs/scania/my2023/extAmp/"""){
+                 sh''' rm -rf archives '''
+                 sh ''' mkdir archives '''
+                 }
+           dir("""${env.workspace}/programs/scania/my2023/extAmp/archives/"""){
+                 sh ''' mkdir artifacts '''
+                 }
+          
+                 dir("""${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts"""){
+        sh ''' pwd '''
+        sh ''' mkdir out '''
+        sh ''' mkdir vp-build '''
+                 }
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/VP_Platform/EXTAMP_Traveo2/release/EXTAMP_VP_Platform /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/out/ '''
+                 
+sh ''' rm -rf /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/VP_Platform/EXTAMP_Traveo2/release/EXTAMP_VP_Platform/lib '''
+                 
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/FBL_Platform/EXTAMP_Traveo2/release/EXTAMP_FBL_Platform /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/out/ '''
+                 
+sh ''' rm -rf /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/FBL_Platform/EXTAMP_Traveo2/release/EXTAMP_FBL_Platform/lib '''
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/BM_Platform/EXTAMP_Traveo2/release/EXTAMP_BM_Platform /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/out/ '''
+                 
+sh ''' rm -rf /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/BM_Platform/EXTAMP_Traveo2/release/EXTAMP_BM_Platform/lib '''
+
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/scripts /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/vp-build/ '''
+
+dir("""${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts"""){   
+                                                       
+   
+  //sh """ tar -zcvf ${env.workspace}/programs/nissan/my2023/P61QR/archives/${BUILD_NUMBER}_release.tar.gz artifacts """
+  //sh """ tar -zcvf ${env.workspace}/programs/nissan/my2023/P61QR/archives/${BUILD_NUMBER}_release.tar.gz artifacts """
+  //sh """ tar -zcvf ${BUILD_NUMBER}_release.tar.gz artifacts """
+  //sh """ tar czfP ${env.workspace}/programs/nissan/my2023/P61QR/archives/artifacts/${BUILD_NUMBER}_release.tgz out vp-build """
+  sh ''' chmod 777 /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/upload_artifactory_scripts/create_daily_tar.sh '''
+  sh '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/upload_artifactory_scripts/create_daily_tar.sh'
+  sh """ cp -r daily.tar.gz ${BUILD_NUMBER}_daily.tar.gz """
+  sh """ jf rt u ${BUILD_NUMBER}_daily.tar.gz "SCANIA_EXTAMP_PLATFORM_28995_2023_Integration/" --server-id=BLR_Artifactory """
+  
+  //sh """  tar -czvf ${env.workspace}/programs/scania/my2023/extAmp/archives/${BUILD_NUMBER}_daily.tar.gz out vp-build """  
+ 
+  //sh """ curl -uvsoci:APAu7pSL3mRA6M3E6hmRHs38qT2 -T "${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz" "https://jfrog.sofia.visteon.com/artifactory/SCANIA_MP23_Daily_Builds/${BUILD_NUMBER}_daily.tar.gz" """         
+        
+            def server = Artifactory.server 'BLR_Artifactory'
+            def UploadSpec = """{
+                "files": [{
+                    "pattern": "${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz",
+                    "target": "SCANIA_EXTAMP_PLATFORM_28995_2023_Integration/",
+                    "recursive": "false"
+                }]
+            }"""
+
+
+            // Upload files to Artifactory:
+            def buildInfo = server.upload spec: UploadSpec
+
+            // Publish the merged build-info to Artifactory
+            server.publishBuildInfo buildInfo
+			
+                    }
+                }
+            }
+        }
+
+stage('Upload_artifacts_Sofia'){
+    steps{
+        script{
+
+sh """ jf rt u ${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz "SCANIA_MP23_Daily_Builds/" --server-id=Sofia_Artifactory """
+
+            def server = Artifactory.server 'Sofia_Artifactory'
+            def UploadSpec = """{
+                "files": [{
+                    "pattern": "${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz",
+                    "target": "SCANIA_MP23_Daily_Builds/",
+                    "recursive": "false"
+                }]
+            }"""
+
+            // Upload files to Artifactory:
+            def buildInfo = server.upload spec: UploadSpec
+
+            // Publish the merged build-info to Artifactory
+            server.publishBuildInfo buildInfo
+
+        }
+    }
+}
+
+
+stage('Publish_RAM_ROM Reports') {
+ steps{
+  script{
+        echo' report started...!!! '
+        dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/"""){
+        sh """python3 Vip_RAM_metrics_Scania_extAmp.py"""
+        }
+		
+	    dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/"""){
+        sh """python3 Vip_ROM_metrics_Scania_extAmp.py"""
+        }
+        
+	publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/results/', reportFiles:'Vip_RAM_Report.html', reportName: 'VIP_RAM_Report'])
+    publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/results/', reportFiles:'Vip_ROM_Report.html', reportName: 'VIP_ROM_Report'])
+    
+          }
+     }
+}
+
+stage('NVM Reports') {
+ steps{
+  script{
+        echo' NVM report started...!!! '
+        dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/NVM/"""){
+        sh """python3 Scania_NVM.py ${WORKSPACE}/programs/scania/my2023/extAmp/rte/Appl/GenData/Fee_Lcfg.c"""
+        }
+        archiveArtifacts allowEmptyArchive: true, artifacts: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/NVM/nvm_consumed.png', caseSensitive: false
+      }
+    }
+} 
+
+//Publish_report_to_dashboard
+stage('Hawk-eye_dashboard') {
+  steps {
+     script {
+	  catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE'){
+      echo "Publishing the data to grafana dashboard ..!!"
+	  sh """ rm -rf hawkeye """
+	  sh """ git clone  https://eu.git.visteon.com/devops/hawkeye.git -b develop"""
+      sh """ python3 hawkeye/Coverity/csv_to_psql_common.py   programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Summary_extamp.csv scania_extamp ${BUILD_ID}"""
+	 }
+	}	
+   }
+  }
+
+//  }
+//}
+
+
+ }
+post {
+always {
+emailext attachLog: false, body:
+   """<p>EXECUTED: Job <b>\'${env.JOB_NAME}:${env.BUILD_NUMBER}\'
+   </b></p><p>View console output at "<a href="${env.BUILD_URL}"> 
+   ${env.JOB_NAME}:${env.BUILD_NUMBER}</a>"</p> """, 
+     compressLog: false,
+     recipientProviders: [[$class: 'DevelopersRecipientProvider'], 
+     [$class: 'RequesterRecipientProvider']],
+    subject: "Status: ${currentBuild.result?:'SUCCESS'} - Job \'${env.JOB_NAME}:${env.BUILD_NUMBER}\'", 
+    to: 'rmuhamm4@visteon.com'
+   }
+  }
+}slave_node = 'IND856ZQG2-L'
+ 
+  pipeline {
+  agent {node {label """${slave_node}""" } }
+  
+  options {
+   timestamps()
+   disableConcurrentBuilds()
+   skipDefaultCheckout()
+   buildDiscarder logRotator(artifactDaysToKeepStr: '30', artifactNumToKeepStr: '30', daysToKeepStr: '30', numToKeepStr: '30')
+  }
+  
+  environment{
+      cov_username='buildsystem'
+      cov_password='buildsystem'
+      no_proxy='cov.group8.visteon.com,bsp-os.git.visteon.com,eu.git.visteon.com,git.visteon.com,*.visteon.com,jfrog.glcc.visteon.com,jfrog.bangalore.visteon.com'
+      http_proxy='http://proxy.visteon.com:80'
+      https_proxy='http://proxy.visteon.com:80'
+      //dn =  '/home/jenkins/.local/bin/dn'
+      PATH="""/home/jenkins/.local/bin:${HOME}/.local/bin:$PATH"""
+      MANIFEST='my2023/extAmp/product/develop.xml'
+	  BRANCH ='develop'
+	  currentDate = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+      WORK_ID=""
+     
+  }
+  
+ stages {
+  
+     stage('Fetch') {
+          steps {
+    	  script{
+    	      
+            echo "checkout started ...!!"
+    
+            buildName '${PROJECT_DISPLAY_NAME}-${BUILD_NUMBER}'  
+            //copyArtifacts filter: 'daily.xml', fingerprintArtifacts: true, projectName: 'Nissan_P61QR/Nisaan_P61QR_Domain_Turing', selector: lastSuccessful()
+            sh ''' rm -rf .repo programs cluster-platform after_sync_* extamp-fbl-bsw extamp-pd Vector git-hooks''' 
+            //sh ''' rm -rf https://bsp-os.git.visteon.com/platform/bsp-os/devops/git-hooks'''
+            //sh """  dn ci gitfetch --profile  profile.ini"""
+            //sh """ dn ci gitfetch  --profile https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest/-/blob/feature/single_build_extAmp/my2023/extAmp/scania_my2023_extamp_ubuntu20.ini --d . """
+            sh """ dn ci gitfetch  --profile https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest/-/blob/develop/my2023/extAmp/scania_my2023_extamp_ubuntu20.ini --d . """
+    	 }
+      }
+    }
+    
+stage('Generate consolidated after_sync.xm'){
+    steps{
+        script{
+
+    sh""" python3 .repo/repo/repo manifest -o - -r>after_sync.xml """
+    sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/after_sync.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_PROMOTION_DEVELOP_INT/ """
+      
+        }
+    }
+} 
+
+//stage('Build Stages') {
+//	parallel {   
+stage('BM_BUILD') {
+   environment{
+        VARIANT='bm_platform.xml'
+   }
+    steps {
+     script {
+      echo "BM build started..!!"
+        
+//        sleep 5
+
+       sh""" dn ci build --type bmclean --profile profile.ini  """
+        
+         sh""" dn ci build --type bm --profile profile.ini  """
+
+    }
+   // recordIssues aggregatingResults: true, tools: [ghsMulti(name: 'GHS_compiler_warning', pattern: '/home/jenkins/workspace/Nissan_P61QR/Nisaan_P61QR_Domain_Turing/programs/nissan/my2023/P61QR/out/VP_Platform/P61QR_Traveo2/release/warnings.txt')]
+   }
+  }
+
+stage('HSM_BUILD') {
+   environment{
+        VARIANT='platform_tv2_cm0plus.xml'
+   }
+    steps {
+     script {
+      echo "HSM build started..!!"
+
+  //      sleep 5
+        
+        sh""" dn ci build --type hsmclean --profile profile.ini  """
+        
+        sh""" dn ci build --type hsm --profile profile.ini  """
+
+    }
+   // recordIssues aggregatingResults: true, tools: [ghsMulti(name: 'GHS_compiler_warning', pattern: '/home/jenkins/workspace/Nissan_P61QR/Nisaan_P61QR_Domain_Turing/programs/nissan/my2023/P61QR/out/VP_Platform/P61QR_Traveo2/release/warnings.txt')]
+   }
+  }
+
+stage('BL_BUILD') {
+   environment{
+        VARIANT='fbl_platform.xml'
+   }
+    steps {
+     script {
+      echo "BL build started..!!"
+        
+    //    sleep 5
+
+       sh""" dn ci build --type blclean --profile profile.ini  """
+        
+         sh""" dn ci build --type bl --profile profile.ini  """
+
+    }
+   // recordIssues aggregatingResults: true, tools: [ghsMulti(name: 'GHS_compiler_warning', pattern: '/home/jenkins/workspace/Nissan_P61QR/Nisaan_P61QR_Domain_Turing/programs/nissan/my2023/P61QR/out/VP_Platform/P61QR_Traveo2/release/warnings.txt')]
+   }
+  }
+
+   stage('VP_BUILD_PreDV') {
+        environment{
+        VARIANT='platform.xml'
+        }
+        steps {
+             script {
+              echo "VP build started..!!"
+
+      //         sleep 5
+
+               sh""" dn ci build --type vpclean --profile profile.ini  """
+        
+                sh""" dn ci build --type vp --profile profile.ini  """
+                
+               // sh""" dn ci build --type vpdebugclean --profile profile.ini  """
+                
+                // sh""" dn ci build --type vpdebug --profile profile.ini  """
+        
+            }
+             recordIssues(tools: [ghsMulti(pattern: 'build.log')])
+            }
+          }
+//  }
+//}
+
+
+  stage('Hex file transfer '){
+      steps{
+          script{
+  
+     build 'Scania_my2023_extAmp_EP28995_HEX_FILE_TRANSFER'
+             
+          }
+      }
+  }
+    
+//stage('Coverity Stages') {
+//	parallel {     
+    stage('vpcovcommit') {
+			steps {
+				script {
+					echo "vp-cov-build started ...!!"
+					sh""" dn ci build --type vpcovcommit --profile profile.ini  """
+				}
+			}
+		}
+			
+		stage('vpmisracommit') {
+			steps {
+				script {
+					echo "vp-misra-build started ...!!"
+					sh""" dn ci build --type vpmisracommit --profile profile.ini  """
+				}
+			}
+		}
+
+  //}
+//}
+
+			
+stage('Cov_plot') {
+			steps {
+				script {
+					echo "Cov_plot started..!!"
+		      dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/coverity_ini_scripts/"""){
+sh '''python ./cov_fetch.py cov-projects_Scania_extAmp.ini VP_Coverity VP_Coverity.json '''
+sh '''python ./cov_fetch.py cov-projects_Scania_extAmp.ini VP_MISRA_C VP_MISRA_C.json '''
+
+sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/coverity_ini_scripts/VP_Coverity.json /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY """
+sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/coverity_ini_scripts/VP_MISRA_C.json /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY """
+
+		}
+    }
+recordIssues(tools: [issues(id:'vp-cov',name:'vp-coverity', pattern: 'VP_Coverity.json')])
+recordIssues(tools: [issues(id:'vp-misra',name:'vp_misra',  pattern: 'VP_MISRA_C.json')])
+			}
+		}
+		stage('gen_vp_coverity_plot') {
+  steps {
+    script {
+        echo "vp-coverity Static/MISRA warning Plot started ...!!"
+        sh """
+        cd ${WORKSPACE}
+        python3 ./programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/gen_cov_plots.py VIP"""
+    }
+  }
+}
+
+
+stage('Coverity_Summary_plot') {
+    steps {
+        script {
+            echo "Tech Team wise warning spilt up Plot started ...!!"
+            sh ''' 
+            cd ${WORKSPACE}
+            python3 ./programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/coverity_summary.py
+            '''
+      }
+    }
+  }
+
+
+		stage("Integration_test_Approval") {
+
+      input {		
+                message " Please enter your Work Id "		
+                ok ""		
+                submitter ""		
+                parameters {		
+                    string(name: 'MY_VAR2', defaultValue: '', description: 'Thank you')		
+                }		
+            }	
+       
+            steps {
+                        
+                script {
+                            
+                      env.RELEASE_TO_PROD = input message: 'Integrator input required',
+                      parameters: [choice(name: 'Promote to Integration', choices: 'no\nyes', description: 'Choose "yes" if Integration test are success')]
+                      
+                      WORK_ID = """${MY_VAR2}"""
+
+                       }
+                    }
+                } 
+           stage("Approve or Reject") {
+        		
+        			parallel {
+        		
+        				stage("Approved") {
+        					
+        					when {
+        					  allOf {
+        						  
+        						  environment name: 'RELEASE_TO_PROD', value: 'yes'
+        					  }
+        					}
+        								
+        					steps {
+        
+        						echo 'Approved to Integration build'
+                    
+                                build 'Scania_my2023_extAmp_EP28995_PROMOTION_DEVELOP_INT'
+  
+                					
+        					}
+        					
+        				}
+        				
+        				stage("Rejected") {
+        					
+        					when {
+        					  allOf {
+        						  
+        						  environment name: 'RELEASE_TO_PROD', value: 'no'
+        					  }
+        					}
+        								
+        					steps {
+        						echo ' Not Approved '
+        						sh ''' Exit 1 '''
+        					}
+        				}
+        		
+  stage("Disapproved manifest Push") {
+
+					when {
+					  allOf {
+						  environment name: 'RELEASE_TO_PROD', value: 'no'
+					  }
+					}
+
+		   steps {
+               script{
+                
+                sh """ cp -r after_sync.xml Disapproved_${currentDate}-${build_number}.xml"""
+                
+                sh """ cp -r after_sync.xml daily.xml """
+
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+
+                MY_VAR = sh(script: 'bash /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/compare_Scania_extAmp_daily.sh', returnStdout: true)
+                
+                sh """exit ${MY_VAR}""" 
+                
+                withCredentials([usernameColonPassword(credentialsId: '07fee9c3-cd94-4196-82ec-ad3bddf7fe3f', variable: 'passkey')]) {
+                
+                sh """ rm -rf manifest """
+                
+                sh """ git clone https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git """
+             
+                dir("""${env.workspace}/manifest/my2023/extAmp/product/daily"""){
+                    sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/Disapproved_${currentDate}-${build_number}.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/manifest/my2023/extAmp/product/daily/"""            
+                    sh """ python3 /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/milestone_manifest_count_30.py """
+                    sh """ git add . && git commit -m "WI ${WORK_ID} ${currentDate}" && git tag Scania_my2023_extAmp_EP28995_DAILY_${BUILD_NUMBER} && git push https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git develop --tags --no-verify"""         
+                }        
+    		            sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/daily.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/last_build.xml """            
+            }
+          }
+        }
+      }
+    }        
+ 	}
+}
+
+
+stage("Update daily.xml") {
+    steps {
+      script {
+               env.RELEASE_TO_PROD = input message: 'Integrator input required',
+               parameters: [choice(name: 'Promote to Integration', choices: 'no\nyes', description: 'Choose "yes" if Integration test are success')]
+			   echo 'Updated daily.xml'
+
+        }
+    }
+}
+ 
+stage("Approve_or_Reject") {
+			parallel {
+				stage("Approved_") 
+				{
+					when {
+					  allOf {
+						  environment name: 'RELEASE_TO_PROD', value: 'yes'
+					  }
+					}
+								
+				steps {
+						echo 'Integrater updated the daily.xml with tags from develop.xml'
+					}
+				}
+				
+				stage("Rejected_") 
+				{
+					when {
+					  allOf {
+						  environment name: 'RELEASE_TO_PROD', value: 'no'
+					  }
+					}
+								
+				steps {
+				echo 'Integrater not updated the daily.xml with tags from develop.xml'
+				sh ''' Exit 1 '''
+				  }
+				}
+	}
+}
+
+
+stage('Archive_after_sync.xml') {
+   steps {
+     script {
+       echo "archive artifacts"
+       sh """ python3 .repo/repo/repo manifest -o - -r>after_sync_${build_number}.xml"""
+       sh """ cp -r after_sync_${build_number}.xml daily.xml"""
+	   sh """ cp -r after_sync_${build_number}.xml ${currentDate}-${build_number}.xml"""
+    }
+     plot csvFileName: 'coverity_static_defects_count.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_static_defects_count.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-StaticAnalysis-extamp', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'line', title: 'Coverity - Static Analysis extamp', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+     plot csvFileName: 'coverity_misra_defects_count.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_misra_defects_count.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-MISRA-extamp', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'line', title: 'Coverity - MISRA extamp', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+    
+    plot csvFileName: 'Coverity_High.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_High.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-High', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-High-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+    plot csvFileName: 'Coverity_Medium.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Medium.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-Medium', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-Medium-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+    plot csvFileName: 'Coverity_Low.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Low.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity-Low', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-Low-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''    
+    plot csvFileName: 'Coverity_All.csv', csvSeries: [[displayTableFlag: false, exclusionValues: '', file: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_All.csv', inclusionFlag: 'OFF', url: '']], exclZero: false, group: 'Coverity_All', keepRecords: false, logarithmic: false, numBuilds: '10', propertiesSeries: [[file: '', label: '']], style: 'bar', title: 'Coverity-All-Defects', useDescr: false, xmlSeries: [[file: '', nodeType: 'NODESET', url: '', xpath: '']], yaxis: 'Impact count', yaxisMaximum: '', yaxisMinimum: ''
+        
+    publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch', reportFiles: 'Coverity_Summary_extamp.html', reportName: 'Coverity_Summary_EXTAMP'])
+   
+    archiveArtifacts allowEmptyArchive: true, artifacts: """daily.xml"""
+    archiveArtifacts allowEmptyArchive: true, artifacts: """after_sync_${build_number}.xml"""
+    archiveArtifacts allowEmptyArchive: true, artifacts: """after_sync.xml,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_High.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Medium.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Low.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_All.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_static_defects_count.csv,programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/coverity_misra_defects_count.csv,/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Summary_extamp.html"""
+     
+	}
+}
+
+//stage('Git_Push, Upload artifacts, NVM Reports, Ram Rom reports & Hawk-eye Stages') {
+//	parallel { 
+ stage("Git_Push") {
+  steps {
+    script{
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+
+                MY_VAR = sh(script: 'bash /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/compare_Scania_extAmp_daily.sh', returnStdout: true)
+                
+                sh """exit ${MY_VAR}""" 
+                
+                withCredentials([usernameColonPassword(credentialsId: '07fee9c3-cd94-4196-82ec-ad3bddf7fe3f', variable: 'passkey')]) {
+                
+                sh """ rm -rf manifest """
+                
+                sh """ git clone https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git """
+             
+                dir("""${env.workspace}/manifest/my2023/extAmp/product/daily"""){
+                    sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/${currentDate}-${build_number}.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/manifest/my2023/extAmp/product/daily/"""            
+                    sh """ python3 /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/Git_push_scripts/milestone_manifest_count_30.py """
+                    sh """ git add . && git commit -m "WI ${WORK_ID} ${currentDate}" && git tag Scania_my2023_extAmp_EP28995_DAILY_${BUILD_NUMBER} && git push https://bsp-os.git.visteon.com/platform/bsp-os/programs/scania/manifest.git develop --tags --no-verify"""         
+                }        
+    		       sh """ cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/daily.xml /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/last_build.xml """            
+              }
+          }
+        }
+    }
+} 
+
+
+stage ('Upload_Artifacts_Bangalore')
+     {
+        steps{
+            script{
+                 dir("""${env.workspace}/programs/scania/my2023/extAmp/"""){
+                 sh''' rm -rf archives '''
+                 sh ''' mkdir archives '''
+                 }
+           dir("""${env.workspace}/programs/scania/my2023/extAmp/archives/"""){
+                 sh ''' mkdir artifacts '''
+                 }
+          
+                 dir("""${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts"""){
+        sh ''' pwd '''
+        sh ''' mkdir out '''
+        sh ''' mkdir vp-build '''
+                 }
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/VP_Platform/EXTAMP_Traveo2/release/EXTAMP_VP_Platform /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/out/ '''
+                 
+sh ''' rm -rf /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/VP_Platform/EXTAMP_Traveo2/release/EXTAMP_VP_Platform/lib '''
+                 
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/FBL_Platform/EXTAMP_Traveo2/release/EXTAMP_FBL_Platform /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/out/ '''
+                 
+sh ''' rm -rf /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/FBL_Platform/EXTAMP_Traveo2/release/EXTAMP_FBL_Platform/lib '''
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/BM_Platform/EXTAMP_Traveo2/release/EXTAMP_BM_Platform /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/out/ '''
+                 
+sh ''' rm -rf /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/out/BM_Platform/EXTAMP_Traveo2/release/EXTAMP_BM_Platform/lib '''
+
+
+sh ''' cp -r /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/scripts /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/archives/artifacts/vp-build/ '''
+
+dir("""${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts"""){   
+                                                       
+   
+  //sh """ tar -zcvf ${env.workspace}/programs/nissan/my2023/P61QR/archives/${BUILD_NUMBER}_release.tar.gz artifacts """
+  //sh """ tar -zcvf ${env.workspace}/programs/nissan/my2023/P61QR/archives/${BUILD_NUMBER}_release.tar.gz artifacts """
+  //sh """ tar -zcvf ${BUILD_NUMBER}_release.tar.gz artifacts """
+  //sh """ tar czfP ${env.workspace}/programs/nissan/my2023/P61QR/archives/artifacts/${BUILD_NUMBER}_release.tgz out vp-build """
+  sh ''' chmod 777 /home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/upload_artifactory_scripts/create_daily_tar.sh '''
+  sh '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/upload_artifactory_scripts/create_daily_tar.sh'
+  sh """ cp -r daily.tar.gz ${BUILD_NUMBER}_daily.tar.gz """
+  sh """ jf rt u ${BUILD_NUMBER}_daily.tar.gz "SCANIA_EXTAMP_PLATFORM_28995_2023_Integration/" --server-id=BLR_Artifactory """
+  
+  //sh """  tar -czvf ${env.workspace}/programs/scania/my2023/extAmp/archives/${BUILD_NUMBER}_daily.tar.gz out vp-build """  
+ 
+  //sh """ curl -uvsoci:APAu7pSL3mRA6M3E6hmRHs38qT2 -T "${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz" "https://jfrog.sofia.visteon.com/artifactory/SCANIA_MP23_Daily_Builds/${BUILD_NUMBER}_daily.tar.gz" """         
+        
+            def server = Artifactory.server 'BLR_Artifactory'
+            def UploadSpec = """{
+                "files": [{
+                    "pattern": "${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz",
+                    "target": "SCANIA_EXTAMP_PLATFORM_28995_2023_Integration/",
+                    "recursive": "false"
+                }]
+            }"""
+
+
+            // Upload files to Artifactory:
+            def buildInfo = server.upload spec: UploadSpec
+
+            // Publish the merged build-info to Artifactory
+            server.publishBuildInfo buildInfo
+			
+                    }
+                }
+            }
+        }
+
+stage('Upload_artifacts_Sofia'){
+    steps{
+        script{
+
+sh """ jf rt u ${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz "SCANIA_MP23_Daily_Builds/" --server-id=Sofia_Artifactory """
+
+            def server = Artifactory.server 'Sofia_Artifactory'
+            def UploadSpec = """{
+                "files": [{
+                    "pattern": "${env.workspace}/programs/scania/my2023/extAmp/archives/artifacts/${BUILD_NUMBER}_daily.tar.gz",
+                    "target": "SCANIA_MP23_Daily_Builds/",
+                    "recursive": "false"
+                }]
+            }"""
+
+            // Upload files to Artifactory:
+            def buildInfo = server.upload spec: UploadSpec
+
+            // Publish the merged build-info to Artifactory
+            server.publishBuildInfo buildInfo
+
+        }
+    }
+}
+
+
+stage('Publish_RAM_ROM Reports') {
+ steps{
+  script{
+        echo' report started...!!! '
+        dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/"""){
+        sh """python3 Vip_RAM_metrics_Scania_extAmp.py"""
+        }
+		
+	    dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/"""){
+        sh """python3 Vip_ROM_metrics_Scania_extAmp.py"""
+        }
+        
+	publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/results/', reportFiles:'Vip_RAM_Report.html', reportName: 'VIP_RAM_Report'])
+    publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '/home/jenkins/workspace/Scania_extAMP_cluster/Scania_my2023_extAmp_EP28995_DAILY/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/RAM_ROM_scripts/scripts/results/', reportFiles:'Vip_ROM_Report.html', reportName: 'VIP_ROM_Report'])
+    
+          }
+     }
+}
+
+stage('NVM Reports') {
+ steps{
+  script{
+        echo' NVM report started...!!! '
+        dir("""${env.workspace}/programs/scania/my2023/extAmp/vp-build/Misc_Scripts/NVM/"""){
+        sh """python3 Scania_NVM.py ${WORKSPACE}/programs/scania/my2023/extAmp/rte/Appl/GenData/Fee_Lcfg.c"""
+        }
+        archiveArtifacts allowEmptyArchive: true, artifacts: 'programs/scania/my2023/extAmp/vp-build/Misc_Scripts/NVM/nvm_consumed.png', caseSensitive: false
+      }
+    }
+} 
+
+//Publish_report_to_dashboard
+stage('Hawk-eye_dashboard') {
+  steps {
+     script {
+	  catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE'){
+      echo "Publishing the data to grafana dashboard ..!!"
+	  sh """ rm -rf hawkeye """
+	  sh """ git clone  https://eu.git.visteon.com/devops/hawkeye.git -b develop"""
+      sh """ python3 hawkeye/Coverity/csv_to_psql_common.py   programs/scania/my2023/extAmp/vp-build/Misc_Scripts/KPI_Scripts/Plot_Batch/Coverity_Summary_extamp.csv scania_extamp ${BUILD_ID}"""
+	 }
+	}	
+   }
+  }
+
+//  }
+//}
+
+
+ }
+post {
+always {
+emailext attachLog: false, body:
+   """<p>EXECUTED: Job <b>\'${env.JOB_NAME}:${env.BUILD_NUMBER}\'
+   </b></p><p>View console output at "<a href="${env.BUILD_URL}"> 
+   ${env.JOB_NAME}:${env.BUILD_NUMBER}</a>"</p> """, 
+     compressLog: false,
+     recipientProviders: [[$class: 'DevelopersRecipientProvider'], 
+     [$class: 'RequesterRecipientProvider']],
+    subject: "Status: ${currentBuild.result?:'SUCCESS'} - Job \'${env.JOB_NAME}:${env.BUILD_NUMBER}\'", 
+    to: 'rmuhamm4@visteon.com'
+   }
+  }
+}
