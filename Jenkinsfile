@@ -4,7 +4,7 @@ pipeline {
     stages {
         stage('Hello') {
             steps {
-                echo 'jnekins job executed successfully'
+                echo 'jnekins job executed successfully finalised'
             }
         }
     }
