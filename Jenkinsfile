@@ -4,7 +4,7 @@ pipeline {
     stages {
         stage('Hello') {
             steps {
-                echo 'THis is new jenkins file'
+                echo 'jnekins job executed successfully'
             }
         }
     }
